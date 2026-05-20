@@ -127,22 +127,20 @@ const App: React.FC = () => {
       });
     });
     
-    // 3. Pad with virtual school competitors if there aren't enough (at least 6 total)
+    // 3. Add all remaining schools as virtual competitors (except those that have individual players)
     const virtualSchools = SCHOOLS.filter(
       (s) => s !== selectedPlayer.school && !ghostsToPlay.some((g) => g.schoolName === s)
     );
     
-    let padIndex = 0;
-    while (participants.length < 6 && padIndex < virtualSchools.length) {
+    virtualSchools.forEach((schoolName) => {
       participants.push({
         playerName: '', // Empty means virtual school
-        schoolName: virtualSchools[padIndex],
+        schoolName: schoolName,
         score: 0,
         isVirtual: true,
         avatar: getRandomAvatar()
       });
-      padIndex++;
-    }
+    });
     
     setScores(participants);
     setGameState(GameState.Question);
