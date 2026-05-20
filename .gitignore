@@ -30,3 +30,6 @@ pnpm-debug.log*
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Local secret backups
+.env.txt

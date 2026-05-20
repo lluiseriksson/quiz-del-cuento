@@ -1,15 +1,16 @@
 import React from 'react';
 import Leaderboard from '@/components/Leaderboard';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
-import { SchoolScore } from '@/types';
+import { LeaderboardEntry } from '@/types';
 
 interface FeedbackScreenProps {
   isCorrect: boolean;
   explanation: string | null;
   isLoadingExplanation: boolean;
   onNext: () => void;
-  scores: SchoolScore[];
+  scores: LeaderboardEntry[];
   playerSchool: string;
+  playerName: string;
 }
 
 const FeedbackScreen: React.FC<FeedbackScreenProps> = ({
@@ -19,6 +20,7 @@ const FeedbackScreen: React.FC<FeedbackScreenProps> = ({
   onNext,
   scores,
   playerSchool,
+  playerName,
 }) => {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 w-full animate-fade-in space-y-8 max-w-4xl mx-auto">
@@ -60,7 +62,12 @@ const FeedbackScreen: React.FC<FeedbackScreenProps> = ({
       </div>
 
       <div className="w-full flex justify-center">
-        <Leaderboard scores={scores} title="Clasificación en Tiempo Real" playerSchool={playerSchool} />
+        <Leaderboard
+          scores={scores}
+          title="Clasificación en Tiempo Real"
+          playerSchool={playerSchool}
+          playerActiveName={playerName}
+        />
       </div>
 
       <button

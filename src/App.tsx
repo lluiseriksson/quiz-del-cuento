@@ -3,7 +3,8 @@ import WelcomeScreen from '@/components/WelcomeScreen';
 import QuestionScreen from '@/components/QuestionScreen';
 import FeedbackScreen from '@/components/FeedbackScreen';
 import FinalScreen from '@/components/FinalScreen';
-import { GameState, Question, Option, SchoolScore, LastAnswer } from '@/types';
+import { GameState, Question, Option, Player, GameAttempt, QuestionResult, LeaderboardEntry, LastAnswer, AvatarConfig } from '@/types';
+import { getRandomAvatar } from '@/components/common/Avatar';
 import { SCHOOLS } from '@/constants';
 import { getAnswerExplanation } from '@/services/geminiService';
 
@@ -16,8 +17,27 @@ const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.Welcome);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [score, setScore] = useState(0);
-  const [playerSchool, setPlayerSchool] = useState('');
-  const [scores, setScores] = useState<SchoolScore[]>([]);
+  
+  // Players and attempts stored persistently
+  const [players, setPlayers] = useState<Player[]>(() => {
+    const saved = localStorage.getItem('quiz_players');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
+  const [attempts, setAttempts] = useState<GameAttempt[]>(() => {
+    const saved = localStorage.getItem('quiz_attempts');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
+  
+  // Real-time in-game tournament leaderboard entries
+  const [scores, setScores] = useState<LeaderboardEntry[]>([]);
+  const [activeGhosts, setActiveGhosts] = useState<GameAttempt[]>([]);
+  
+  // Active player results for the current run
+  const [currentResults, setCurrentResults] = useState<QuestionResult[]>([]);
+
   const [storyText, setStoryText] = useState('');
   const [questions, setQuestions] = useState<Question[]>([]);
   const [shuffledQuestions, setShuffledQuestions] = useState<Question[]>([]);
@@ -29,30 +49,92 @@ const App: React.FC = () => {
     return [...scores].sort((a, b) => b.score - a.score);
   }, [scores]);
 
-  const handleStartGame = (schoolName: string, loadedStory: string, loadedQuestions: Question[]) => {
-    setPlayerSchool(schoolName);
+  const handleCreatePlayer = (name: string, school: string, avatar: AvatarConfig): Player => {
+    const newPlayer: Player = {
+      id: Math.random().toString(36).substring(2, 9),
+      name,
+      school,
+      highScore: 0,
+      avatar
+    };
+    const updated = [...players, newPlayer];
+    setPlayers(updated);
+    localStorage.setItem('quiz_players', JSON.stringify(updated));
+    return newPlayer;
+  };
+
+  const handleStartGame = (selectedPlayer: Player, loadedStory: string, loadedQuestions: Question[]) => {
+    setCurrentPlayer(selectedPlayer);
     setStoryText(loadedStory);
     setQuestions(loadedQuestions);
     setShuffledQuestions(shuffleArray(loadedQuestions));
     setScore(0);
     setCurrentQuestionIndex(0);
+    setCurrentResults([]);
     
-    // Initialize scores for ALL schools to 0 at the start of a new game.
-    const initialScores = SCHOOLS.map((name) => ({ name, score: 0 }));
-    setScores(initialScores);
+    // Set up the tournament leaderboard participants
+    const participants: LeaderboardEntry[] = [];
+    
+    // 1. Add active player
+    participants.push({
+      playerName: selectedPlayer.name,
+      schoolName: selectedPlayer.school,
+      score: 0,
+      avatar: selectedPlayer.avatar
+    });
+    
+    // 2. Select historical ghost opponents (unique per player name + school)
+    const uniqueAttempts: { [key: string]: GameAttempt } = {};
+    attempts.forEach(attempt => {
+      // Don't compete against your current self
+      if (attempt.playerName === selectedPlayer.name && attempt.schoolName === selectedPlayer.school) {
+        return;
+      }
+      const key = `${attempt.playerName}-${attempt.schoolName}`;
+      // Keep their highest score attempt
+      if (!uniqueAttempts[key] || uniqueAttempts[key].totalScore < attempt.totalScore) {
+        uniqueAttempts[key] = attempt;
+      }
+    });
+    
+    const ghostsToPlay = Object.values(uniqueAttempts);
+    setActiveGhosts(ghostsToPlay);
+    
+    ghostsToPlay.forEach(ghost => {
+      participants.push({
+        playerName: ghost.playerName,
+        schoolName: ghost.schoolName,
+        score: 0,
+        avatar: ghost.avatar
+      });
+    });
+    
+    // 3. Pad with virtual school competitors if there aren't enough (at least 6 total)
+    const virtualSchools = SCHOOLS.filter(
+      (s) => s !== selectedPlayer.school && !ghostsToPlay.some((g) => g.schoolName === s)
+    );
+    
+    let padIndex = 0;
+    while (participants.length < 6 && padIndex < virtualSchools.length) {
+      participants.push({
+        playerName: '', // Empty means virtual school
+        schoolName: virtualSchools[padIndex],
+        score: 0,
+        isVirtual: true,
+        avatar: getRandomAvatar()
+      });
+      padIndex++;
+    }
+    
+    setScores(participants);
     setGameState(GameState.Question);
   };
 
   const handleAnswer = async (answer: Option, timeTaken: number) => {
+    if (!currentPlayer) return;
     const isCorrect = answer.isCorrect;
     const currentQuestion = shuffledQuestions[currentQuestionIndex];
     
-    setLastAnswer({
-      isCorrect,
-      selectedAnswer: answer.text,
-      question: currentQuestion,
-    });
-
     // 1. Calculate player's points for this round
     let playerPointsThisRound = 0;
     if (isCorrect) {
@@ -62,27 +144,54 @@ const App: React.FC = () => {
     const newPlayerScore = score + playerPointsThisRound;
     setScore(newPlayerScore);
 
-    // 2. Simulate results for all schools and update the leaderboard
+    // Save active player's question result
+    const qResult: QuestionResult = {
+      questionIndex: currentQuestionIndex,
+      isCorrect,
+      timeTaken,
+      points: playerPointsThisRound
+    };
+    setCurrentResults(prev => [...prev, qResult]);
+
+    setLastAnswer({
+      isCorrect,
+      selectedAnswer: answer.text,
+      question: currentQuestion,
+    });
+
+    // 2. Update real-time scores for all participants
     setScores((prevScores) =>
-      prevScores.map((school) => {
-        // A) Update the player's school score
-        if (school.name === playerSchool) {
-          return { ...school, score: newPlayerScore };
+      prevScores.map((entry) => {
+        // A) Update active player
+        if (entry.playerName === currentPlayer.name && entry.schoolName === currentPlayer.school && !entry.isVirtual) {
+          return { ...entry, score: newPlayerScore };
         }
-        // B) Simulate for opponent schools
-        // Give opponents a chance to be correct (e.g., between 65% and 85% probability)
+        
+        // B) Update real ghosts from previous attempts
+        if (!entry.isVirtual && entry.playerName) {
+          const ghostAttempt = activeGhosts.find(
+            (g) => g.playerName === entry.playerName && g.schoolName === entry.schoolName
+          );
+          if (ghostAttempt) {
+            // Find what they did at this exact question index
+            const matchingResult = ghostAttempt.results.find(
+              (r) => r.questionIndex === currentQuestionIndex
+            );
+            const pointsToAdd = matchingResult ? matchingResult.points : 0;
+            return { ...entry, score: entry.score + pointsToAdd };
+          }
+        }
+
+        // C) Update virtual opponents (random simulation)
         const opponentCorrectChance = 0.65 + Math.random() * 0.2;
         const isOpponentCorrect = Math.random() < opponentCorrectChance;
         if (isOpponentCorrect) {
-          // If correct, simulate a realistic time taken (e.g., between 2s and 50s)
           const simulatedTime = Math.random() * 48000 + 2000;
           const timeLimit = 60000;
           const opponentPoints = Math.round(1000 - (simulatedTime / timeLimit) * 500);
-          return { ...school, score: school.score + opponentPoints };
-        } else {
-          // Opponent was incorrect, no points for this round
-          return school;
+          return { ...entry, score: entry.score + opponentPoints };
         }
+        return entry;
       })
     );
 
@@ -108,6 +217,36 @@ const App: React.FC = () => {
       setCurrentQuestionIndex((prevIndex) => prevIndex + 1);
       setGameState(GameState.Question);
     } else {
+      // Game ended! Save attempt to history for asynchronous multiplayer replays
+      if (currentPlayer) {
+        const finalResults = [...currentResults];
+        
+        // Safety check to ensure results match shuffledQuestions length
+        const newAttempt: GameAttempt = {
+          id: Math.random().toString(36).substring(2, 9),
+          playerName: currentPlayer.name,
+          schoolName: currentPlayer.school,
+          results: finalResults,
+          totalScore: score,
+          timestamp: Date.now(),
+          avatar: currentPlayer.avatar
+        };
+        
+        const updatedAttempts = [...attempts, newAttempt];
+        setAttempts(updatedAttempts);
+        localStorage.setItem('quiz_attempts', JSON.stringify(updatedAttempts));
+        
+        // Update high score in players list
+        const updatedPlayers = players.map(p => {
+          if (p.id === currentPlayer.id) {
+            return { ...p, highScore: Math.max(p.highScore, score) };
+          }
+          return p;
+        });
+        setPlayers(updatedPlayers);
+        localStorage.setItem('quiz_players', JSON.stringify(updatedPlayers));
+      }
+      
       setGameState(GameState.Final);
     }
   };
@@ -122,7 +261,13 @@ const App: React.FC = () => {
   const renderScreen = () => {
     switch (gameState) {
       case GameState.Welcome:
-        return <WelcomeScreen onStart={handleStartGame} />;
+        return (
+          <WelcomeScreen
+            players={players}
+            onCreatePlayer={handleCreatePlayer}
+            onStart={handleStartGame}
+          />
+        );
       case GameState.Question:
         if (shuffledQuestions.length === 0) return null;
         return (
@@ -135,7 +280,7 @@ const App: React.FC = () => {
           />
         );
       case GameState.Feedback:
-        if (!lastAnswer) return null;
+        if (!lastAnswer || !currentPlayer) return null;
         return (
           <FeedbackScreen
             isCorrect={lastAnswer.isCorrect}
@@ -143,19 +288,28 @@ const App: React.FC = () => {
             isLoadingExplanation={isLoadingExplanation}
             onNext={handleNextQuestion}
             scores={sortedScores}
-            playerSchool={playerSchool}
+            playerSchool={currentPlayer.school}
+            playerName={currentPlayer.name}
           />
         );
       case GameState.Final:
+        if (!currentPlayer) return null;
         return (
           <FinalScreen
             scores={sortedScores}
             onPlayAgain={handlePlayAgain}
-            playerSchool={playerSchool}
+            playerSchool={currentPlayer.school}
+            playerName={currentPlayer.name}
           />
         );
       default:
-        return <WelcomeScreen onStart={handleStartGame} />;
+        return (
+          <WelcomeScreen
+            players={players}
+            onCreatePlayer={handleCreatePlayer}
+            onStart={handleStartGame}
+          />
+        );
     }
   };
 

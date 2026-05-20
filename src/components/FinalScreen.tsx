@@ -1,38 +1,50 @@
 import React from 'react';
 import Leaderboard from '@/components/Leaderboard';
-import { SchoolScore } from '@/types';
+import { LeaderboardEntry } from '@/types';
 
 interface FinalScreenProps {
-  scores: SchoolScore[];
+  scores: LeaderboardEntry[];
   onPlayAgain: () => void;
   playerSchool: string;
+  playerName: string;
 }
 
-const FinalScreen: React.FC<FinalScreenProps> = ({ scores, onPlayAgain, playerSchool }) => {
+const FinalScreen: React.FC<FinalScreenProps> = ({ scores, onPlayAgain, playerSchool, playerName }) => {
   // Find where the player school finished
-  const playerRank = scores.findIndex((s) => s.name === playerSchool) + 1;
-  const isPodium = playerRank <= 3;
+  const playerRank = scores.findIndex((s) => s.playerName === playerName && s.schoolName === playerSchool) + 1;
+  const isPodium = playerRank > 0 && playerRank <= 3;
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 w-full animate-fade-in space-y-8 max-w-4xl mx-auto relative">
       {/* Glow effects */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl -z-10" />
 
-      <div className="text-center">
+      <div className="text-center animate-fade-in">
         <div className="text-6xl md:text-7xl mb-4 animate-float">
           {isPodium ? '🏆' : '⭐'}
         </div>
         <h1 className="text-5xl md:text-6xl font-extrabold mb-3 bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent filter drop-shadow-[0_0_15px_rgba(245,158,11,0.2)]">
           ¡Juego Completado!
         </h1>
-        <p className="text-lg md:text-xl text-slate-300 font-light">
-          ¡Increíble esfuerzo! Tu escuela finalizó en el puesto{' '}
-          <span className="font-bold text-yellow-400 text-glow">#{playerRank}</span>.
-        </p>
+        {playerRank > 0 ? (
+          <p className="text-lg md:text-xl text-slate-300 font-light">
+            ¡Increíble esfuerzo, <span className="font-bold text-slate-100">{playerName}</span>! Finalizaste en el puesto{' '}
+            <span className="font-bold text-yellow-400 text-glow">#{playerRank}</span>.
+          </p>
+        ) : (
+          <p className="text-lg md:text-xl text-slate-300 font-light">
+            ¡Increíble esfuerzo, <span className="font-bold text-slate-100">{playerName}</span>! Tu partida ha concluido.
+          </p>
+        )}
       </div>
 
       <div className="w-full flex justify-center">
-        <Leaderboard scores={scores} title="Resultados Finales del Torneo" playerSchool={playerSchool} />
+        <Leaderboard
+          scores={scores}
+          title="Resultados Finales del Torneo"
+          playerSchool={playerSchool}
+          playerActiveName={playerName}
+        />
       </div>
 
       <button
