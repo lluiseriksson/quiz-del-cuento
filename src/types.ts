@@ -36,6 +36,14 @@ export interface QuestionResult {
   points: number;
 }
 
+export interface SavedQuiz {
+  id: string;
+  title: string;
+  storyText: string;
+  questions: Question[];
+  timestamp: number;
+}
+
 export interface GameAttempt {
   id: string;
   playerName: string;
@@ -44,6 +52,7 @@ export interface GameAttempt {
   totalScore: number;
   timestamp: number;
   avatar?: AvatarConfig;
+  quizTitle?: string;
 }
 
 export interface LeaderboardEntry {

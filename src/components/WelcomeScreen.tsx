@@ -8,7 +8,7 @@ interface WelcomeScreenProps {
   players: Player[];
   onCreatePlayer: (name: string, school: string, avatar: AvatarConfig) => Player;
   onUpdatePlayer: (id: string, name: string, avatar: AvatarConfig) => void;
-  onStart: (player: Player, storyText: string, questions: Question[]) => void;
+  onStart: (player: Player, storyText: string, questions: Question[], quizTitle: string) => void;
 }
 
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, onUpdatePlayer, onStart }) => {
@@ -23,6 +23,14 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, 
   const [avatarColor, setAvatarColor] = useState('purple');
   const [activeTab, setActiveTab] = useState<'character' | 'accessory' | 'color'>('character');
 
+  // Quiz Library States
+  const [savedQuizzes, setSavedQuizzes] = useState<any[]>(() => {
+    const saved = localStorage.getItem('quiz_library');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [selectedQuizId, setSelectedQuizId] = useState('');
+  const [newQuizTitle, setNewQuizTitle] = useState('');
+
   const [storyFile, setStoryFile] = useState<File | null>(null);
   const [questionsFile, setQuestionsFile] = useState<File | null>(null);
   const [error, setError] = useState('');
@@ -35,13 +43,35 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, 
 
   const handleFileChange = (
     event: React.ChangeEvent<HTMLInputElement>,
-    setter: React.Dispatch<React.SetStateAction<File | null>>
+    setter: React.Dispatch<React.SetStateAction<File | null>>,
+    isFileQuestions = false
   ) => {
     const file = event.target.files?.[0];
     if (file) {
       if (file.type === "text/plain" || file.name.endsWith('.txt')) {
         setter(file);
         setError('');
+        if (isFileQuestions && !newQuizTitle) {
+          // Clean file name for title
+          let cleanedName = file.name
+            .replace(/\.[^/.]+$/, "") // remove extension
+            .replace(/_preguntas|_cuento|preguntas|cuento/gi, "") // remove keywords
+            .replace(/[-_]/g, " ") // replace dash/underscore with space
+            .trim();
+          
+          // Capitalize words nicely
+          cleanedName = cleanedName
+            .split(" ")
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ");
+
+          // Special check for billy and minimonsters
+          if (cleanedName.toLowerCase().includes("billy") && (cleanedName.toLowerCase().includes("11") || cleanedName.toLowerCase().includes("cap"))) {
+            setNewQuizTitle("Libro 11 de Billy y los Minimonstruos Capítulo 2");
+          } else {
+            setNewQuizTitle(cleanedName || "Nuevo Quiz");
+          }
+        }
       } else {
         setter(null);
         setError("Por favor, selecciona un archivo de texto (.txt)");
@@ -149,24 +179,68 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, 
     }
   };
 
+  const handleDeleteQuiz = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = savedQuizzes.filter(q => q.id !== id);
+    setSavedQuizzes(updated);
+    localStorage.setItem('quiz_library', JSON.stringify(updated));
+    if (selectedQuizId === id) {
+      setSelectedQuizId('');
+    }
+  };
+
   const handleStartClick = async () => {
     const activePlayer = players.find((p) => p.id === selectedPlayerId);
-    if (!selectedSchool || !activePlayer || !storyFile || !questionsFile) {
-      setError("Por favor, completa todos los campos (escuela, jugador y archivos).");
+    if (!selectedSchool || !activePlayer) {
+      setError("Por favor, selecciona escuela y jugador.");
       return;
     }
-    try {
-      const storyText = await storyFile.text();
-      const questionsText = await questionsFile.text();
-      const questions = parseQuestionsTxt(questionsText);
-      if (questions.length === 0) {
-        setError("El archivo de preguntas está vacío o tiene un formato incorrecto.");
+
+    if (selectedQuizId) {
+      // Load saved quiz
+      const quiz = savedQuizzes.find(q => q.id === selectedQuizId);
+      if (!quiz) {
+        setError("No se pudo encontrar el Quiz guardado.");
         return;
       }
-      onStart(activePlayer, storyText, questions);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Error desconocido al procesar los archivos.";
-      setError(`Error: ${message}`);
+      onStart(activePlayer, quiz.storyText, quiz.questions, quiz.title);
+    } else {
+      // Parse new uploaded files
+      if (!storyFile || !questionsFile) {
+        setError("Por favor, completa todos los campos (cuento y preguntas) para el nuevo Quiz.");
+        return;
+      }
+      const titleTrimmed = newQuizTitle.trim();
+      if (!titleTrimmed) {
+        setError("Por favor, introduce un título para el Quiz.");
+        return;
+      }
+      try {
+        const storyText = await storyFile.text();
+        const questionsText = await questionsFile.text();
+        const questions = parseQuestionsTxt(questionsText);
+        if (questions.length === 0) {
+          setError("El archivo de preguntas está vacío o tiene un formato incorrecto.");
+          return;
+        }
+
+        // Save this new quiz to our library in localStorage
+        const newQuiz = {
+          id: Math.random().toString(36).substring(2, 9),
+          title: titleTrimmed,
+          storyText,
+          questions,
+          timestamp: Date.now()
+        };
+        const updatedLibrary = [...savedQuizzes, newQuiz];
+        setSavedQuizzes(updatedLibrary);
+        localStorage.setItem('quiz_library', JSON.stringify(updatedLibrary));
+
+        onStart(activePlayer, storyText, questions, titleTrimmed);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Error desconocido al procesar los archivos.";
+        setError(`Error: ${message}`);
+      }
     }
   };
 
@@ -422,51 +496,116 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, 
           </div>
         )}
 
-        {/* Step 3: Cuento Upload */}
+        {/* Step 3: Select Quiz/Kahoot from library or upload new */}
         <div className="space-y-1.5 text-left">
-          <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider pl-1">3. Texto del Cuento</label>
-          <button
-            onClick={() => storyInputRef.current?.click()}
-            className={`w-full p-3.5 border rounded-xl text-left text-sm transition-all flex items-center justify-between cursor-pointer outline-none ${
-              storyFile 
-                ? 'bg-purple-950/40 border-purple-500/50 text-purple-200' 
-                : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
-            }`}
+          <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider pl-1">3. Selecciona tu Quiz / Cuento</label>
+          <select
+            value={selectedQuizId}
+            onChange={(e) => {
+              setSelectedQuizId(e.target.value);
+              setError('');
+            }}
+            className="w-full p-3.5 bg-slate-950/80 border border-slate-800 hover:border-slate-700 focus:border-purple-500 rounded-xl text-slate-100 text-sm focus:ring-2 focus:ring-purple-500/20 transition-all cursor-pointer outline-none"
           >
-            <span className="truncate">{storyFile ? `📖 ${storyFile.name}` : 'Cargar Cuento (.txt)'}</span>
-            <span className="text-xs bg-slate-800/60 py-1 px-2.5 rounded-lg border border-slate-700/40">Subir</span>
-          </button>
-          <input
-            type="file"
-            accept=".txt"
-            ref={storyInputRef}
-            onChange={(e) => handleFileChange(e, setStoryFile)}
-            className="hidden"
-          />
+            {savedQuizzes.length > 0 ? (
+              <>
+                <option value="">➕ Cargar nuevo Quiz (.txt)...</option>
+                {savedQuizzes.map((quiz) => (
+                  <option key={quiz.id} value={quiz.id} className="bg-slate-900">
+                    📖 {quiz.title} ({quiz.questions.length} preg.)
+                  </option>
+                ))}
+              </>
+            ) : (
+              <option value="">➕ Cargar nuevo Quiz (.txt)...</option>
+            )}
+          </select>
         </div>
 
-        {/* Step 4: Questions Upload */}
-        <div className="space-y-1.5 text-left">
-          <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider pl-1">4. Preguntas de Comprensión</label>
-          <button
-            onClick={() => questionsInputRef.current?.click()}
-            className={`w-full p-3.5 border rounded-xl text-left text-sm transition-all flex items-center justify-between cursor-pointer outline-none ${
-              questionsFile 
-                ? 'bg-purple-950/40 border-purple-500/50 text-purple-200' 
-                : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
-            }`}
-          >
-            <span className="truncate">{questionsFile ? `❓ ${questionsFile.name}` : 'Cargar Preguntas (.txt)'}</span>
-            <span className="text-xs bg-slate-800/60 py-1 px-2.5 rounded-lg border border-slate-700/40">Subir</span>
-          </button>
-          <input
-            type="file"
-            accept=".txt"
-            ref={questionsInputRef}
-            onChange={(e) => handleFileChange(e, setQuestionsFile)}
-            className="hidden"
-          />
-        </div>
+        {/* Selected Saved Quiz Card */}
+        {selectedQuizId !== '' && (
+          <div className="flex items-center justify-between p-4 bg-purple-950/20 border border-purple-500/20 rounded-xl animate-fade-in text-left">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold text-purple-300 uppercase tracking-wider">Cuento Guardado</div>
+              <div className="text-sm font-bold text-slate-100 truncate max-w-[280px]">
+                {savedQuizzes.find(q => q.id === selectedQuizId)?.title}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {savedQuizzes.find(q => q.id === selectedQuizId)?.questions.length} preguntas guardadas
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => handleDeleteQuiz(selectedQuizId, e)}
+              className="p-2 bg-red-950/20 hover:bg-red-900/35 text-red-400 border border-red-500/20 hover:border-red-500/40 rounded-lg transition-all active:scale-95 cursor-pointer flex items-center justify-center text-xs ml-2"
+              title="Eliminar Quiz de la biblioteca"
+            >
+              🗑️
+            </button>
+          </div>
+        )}
+
+        {/* New Quiz File Uploads panel */}
+        {selectedQuizId === '' && (
+          <div className="space-y-4 p-4 bg-slate-950/40 rounded-xl border border-slate-800/60 animate-fade-in text-left">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-pink-300 uppercase tracking-wider pl-1">Título del Quiz / Kahoot</label>
+              <input
+                type="text"
+                placeholder="Ej: Libro 11 de Billy y los Minimonstruos..."
+                value={newQuizTitle}
+                onChange={(e) => setNewQuizTitle(e.target.value)}
+                className="w-full p-2.5 bg-slate-950 border border-slate-800 focus:border-pink-500 rounded-lg text-slate-100 text-xs outline-none"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider pl-1">Texto del Cuento</label>
+              <button
+                type="button"
+                onClick={() => storyInputRef.current?.click()}
+                className={`w-full p-3 border rounded-xl text-left text-sm transition-all flex items-center justify-between cursor-pointer outline-none ${
+                  storyFile 
+                    ? 'bg-purple-950/40 border-purple-500/50 text-purple-200' 
+                    : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                }`}
+              >
+                <span className="truncate">{storyFile ? `📖 ${storyFile.name}` : 'Cargar Cuento (.txt)'}</span>
+                <span className="text-xs bg-slate-800/60 py-1 px-2.5 rounded-lg border border-slate-700/40">Subir</span>
+              </button>
+              <input
+                type="file"
+                accept=".txt"
+                ref={storyInputRef}
+                onChange={(e) => handleFileChange(e, setStoryFile)}
+                className="hidden"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider pl-1">Preguntas de Comprensión</label>
+              <button
+                type="button"
+                onClick={() => questionsInputRef.current?.click()}
+                className={`w-full p-3 border rounded-xl text-left text-sm transition-all flex items-center justify-between cursor-pointer outline-none ${
+                  questionsFile 
+                    ? 'bg-purple-950/40 border-purple-500/50 text-purple-200' 
+                    : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                }`}
+              >
+                <span className="truncate">{questionsFile ? `❓ ${questionsFile.name}` : 'Cargar Preguntas (.txt)'}</span>
+                <span className="text-xs bg-slate-800/60 py-1 px-2.5 rounded-lg border border-slate-700/40">Subir</span>
+              </button>
+              <input
+                type="file"
+                accept=".txt"
+                ref={questionsInputRef}
+                onChange={(e) => handleFileChange(e, setQuestionsFile, true)}
+                className="hidden"
+              />
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl text-left">
@@ -476,7 +615,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, 
 
         <button
           onClick={handleStartClick}
-          disabled={!selectedSchool || !selectedPlayerId || !storyFile || !questionsFile}
+          disabled={!selectedSchool || !selectedPlayerId || (!selectedQuizId && (!storyFile || !questionsFile))}
           className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-lg rounded-xl shadow-lg hover:shadow-purple-500/20 active:scale-[0.98] transform hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none disabled:transform-none cursor-pointer"
         >
           ¡Empezar Competición!

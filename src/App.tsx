@@ -44,6 +44,7 @@ const App: React.FC = () => {
   const [lastAnswer, setLastAnswer] = useState<LastAnswer | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
+  const [currentQuizTitle, setCurrentQuizTitle] = useState('');
 
   const sortedScores = useMemo(() => {
     return [...scores].sort((a, b) => b.score - a.score);
@@ -81,7 +82,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleStartGame = (selectedPlayer: Player, loadedStory: string, loadedQuestions: Question[]) => {
+  const handleStartGame = (selectedPlayer: Player, loadedStory: string, loadedQuestions: Question[], quizTitle: string) => {
     setCurrentPlayer(selectedPlayer);
     setStoryText(loadedStory);
     setQuestions(loadedQuestions);
@@ -89,6 +90,7 @@ const App: React.FC = () => {
     setScore(0);
     setCurrentQuestionIndex(0);
     setCurrentResults([]);
+    setCurrentQuizTitle(quizTitle);
     
     // Set up the tournament leaderboard participants
     const participants: LeaderboardEntry[] = [];
@@ -101,9 +103,12 @@ const App: React.FC = () => {
       avatar: selectedPlayer.avatar
     });
     
-    // 2. Select historical ghost opponents (unique per player name + school)
+    // 2. Select historical ghost opponents (unique per player name + school, filtered by matching quiz title)
     const uniqueAttempts: { [key: string]: GameAttempt } = {};
     attempts.forEach(attempt => {
+      if (attempt.quizTitle && attempt.quizTitle !== quizTitle) {
+        return;
+      }
       // Don't compete against your current self
       if (attempt.playerName === selectedPlayer.name && attempt.schoolName === selectedPlayer.school) {
         return;
@@ -245,7 +250,8 @@ const App: React.FC = () => {
           results: finalResults,
           totalScore: score,
           timestamp: Date.now(),
-          avatar: currentPlayer.avatar
+          avatar: currentPlayer.avatar,
+          quizTitle: currentQuizTitle
         };
         
         const updatedAttempts = [...attempts, newAttempt];
