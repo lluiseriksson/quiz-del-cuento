@@ -7,13 +7,15 @@ import Avatar, { AVATAR_CHARACTERS, AVATAR_ACCESSORIES, AVATAR_COLORS, getRandom
 interface WelcomeScreenProps {
   players: Player[];
   onCreatePlayer: (name: string, school: string, avatar: AvatarConfig) => Player;
+  onUpdatePlayer: (id: string, name: string, avatar: AvatarConfig) => void;
   onStart: (player: Player, storyText: string, questions: Question[]) => void;
 }
 
-const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, onStart }) => {
+const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, onUpdatePlayer, onStart }) => {
   const [selectedSchool, setSelectedSchool] = useState('');
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
   const [newPlayerName, setNewPlayerName] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
   
   // Avatar Customizer Local States
   const [avatarChar, setAvatarChar] = useState('panda');
@@ -85,6 +87,65 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, 
       setAvatarColor(rand.color);
     } catch (err) {
       setError("Error al crear el jugador.");
+    }
+  };
+
+  const handleStartEdit = () => {
+    if (!selectedPlayer) return;
+    setNewPlayerName(selectedPlayer.name);
+    setAvatarChar(selectedPlayer.avatar?.character || 'panda');
+    setAvatarAcc(selectedPlayer.avatar?.accessory || 'none');
+    setAvatarColor(selectedPlayer.avatar?.color || 'purple');
+    setIsEditing(true);
+    setError('');
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setNewPlayerName('');
+    // Reset customizer to random
+    const rand = getRandomAvatar();
+    setAvatarChar(rand.character);
+    setAvatarAcc(rand.accessory);
+    setAvatarColor(rand.color);
+    setError('');
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const nameTrimmed = newPlayerName.trim();
+    if (!nameTrimmed) {
+      setError("El nombre del jugador no puede estar vacío.");
+      return;
+    }
+    if (!selectedPlayer) return;
+
+    // Check duplicate name inside the same school (excluding current player)
+    const isDuplicate = schoolPlayers.some(
+      (p) => p.id !== selectedPlayer.id && p.name.toLowerCase() === nameTrimmed.toLowerCase()
+    );
+    if (isDuplicate) {
+      setError(`Ya existe un jugador llamado "${nameTrimmed}" en esta escuela.`);
+      return;
+    }
+
+    try {
+      onUpdatePlayer(selectedPlayer.id, nameTrimmed, {
+        character: avatarChar,
+        accessory: avatarAcc,
+        color: avatarColor
+      });
+      setIsEditing(false);
+      setNewPlayerName('');
+      setError('');
+      
+      // Reset customizer to random for next creations
+      const rand = getRandomAvatar();
+      setAvatarChar(rand.character);
+      setAvatarAcc(rand.accessory);
+      setAvatarColor(rand.color);
+    } catch (err) {
+      setError("Error al actualizar el jugador.");
     }
   };
 
@@ -178,19 +239,42 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, 
             </div>
 
             {/* Display active selected player card with their avatar! */}
-            {selectedPlayer && (
-              <div className="flex items-center gap-3 p-3 bg-purple-950/20 border border-purple-500/20 rounded-xl animate-fade-in">
-                <Avatar config={selectedPlayer.avatar} size={44} className="animate-float" />
-                <div>
-                  <div className="text-sm font-bold text-slate-100">¡Hola, {selectedPlayer.name}! 👋</div>
-                  <div className="text-[10px] text-purple-300 uppercase tracking-wider font-semibold">Récord Máximo: {selectedPlayer.highScore} pts</div>
+            {selectedPlayer && !isEditing && (
+              <div className="flex items-center justify-between p-3 bg-purple-950/20 border border-purple-500/20 rounded-xl animate-fade-in">
+                <div className="flex items-center gap-3">
+                  <Avatar config={selectedPlayer.avatar} size={44} className="animate-float" />
+                  <div>
+                    <div className="text-sm font-bold text-slate-100">¡Hola, {selectedPlayer.name}! 👋</div>
+                    <div className="text-[10px] text-purple-300 uppercase tracking-wider font-semibold">Récord Máximo: {selectedPlayer.highScore} pts</div>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleStartEdit}
+                  className="p-2 bg-slate-900/60 hover:bg-slate-800 text-purple-350 hover:text-purple-250 border border-slate-800 hover:border-slate-700 rounded-lg transition-all active:scale-95 cursor-pointer flex items-center justify-center text-xs"
+                  title="Editar perfil"
+                >
+                  ✏️ Editar
+                </button>
               </div>
             )}
 
-            {/* Quick Create Player Inline Form with Avatar Customizer */}
-            <form onSubmit={handleCreatePlayer} className="space-y-3.5 pt-3.5 border-t border-slate-800/60">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">O crea un nuevo jugador</label>
+            {/* Quick Create/Edit Player Form with Avatar Customizer */}
+            <form onSubmit={isEditing ? handleSaveEdit : handleCreatePlayer} className="space-y-3.5 pt-3.5 border-t border-slate-800/60">
+              <div className="flex justify-between items-center pl-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  {isEditing ? `Editando perfil de ${selectedPlayer?.name}` : 'O crea un nuevo jugador'}
+                </label>
+                {isEditing && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="text-[9px] text-red-400 hover:text-red-300 font-bold transition-all cursor-pointer uppercase tracking-wider"
+                  >
+                    Cancelar ❌
+                  </button>
+                )}
+              </div>
               
               <div className="flex gap-2">
                 <input
@@ -308,12 +392,32 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ players, onCreatePlayer, 
                 </div>
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-550 hover:to-rose-550 active:scale-95 text-white font-bold text-[11px] rounded-xl shadow-md transition-all cursor-pointer"
-              >
-                ➕ Añadir Alumno
-              </button>
+              <div className="flex gap-2">
+                {isEditing ? (
+                  <>
+                    <button
+                      type="submit"
+                      className="flex-grow py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-550 hover:to-teal-550 active:scale-[0.97] text-white font-bold text-[11px] rounded-xl shadow-md transition-all cursor-pointer"
+                    >
+                      💾 Guardar Cambios
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelEdit}
+                      className="px-3 py-2 bg-slate-900 hover:bg-slate-850 active:scale-[0.97] text-slate-350 font-bold text-[11px] rounded-xl border border-slate-800 hover:border-slate-700 transition-all cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-550 hover:to-rose-550 active:scale-95 text-white font-bold text-[11px] rounded-xl shadow-md transition-all cursor-pointer"
+                  >
+                    ➕ Añadir Alumno
+                  </button>
+                )}
+              </div>
             </form>
           </div>
         )}

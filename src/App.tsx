@@ -63,6 +63,24 @@ const App: React.FC = () => {
     return newPlayer;
   };
 
+  const handleUpdatePlayer = (id: string, name: string, avatar: AvatarConfig) => {
+    const oldPlayer = players.find(p => p.id === id);
+    const updatedPlayers = players.map(p => p.id === id ? { ...p, name, avatar } : p);
+    setPlayers(updatedPlayers);
+    localStorage.setItem('quiz_players', JSON.stringify(updatedPlayers));
+
+    if (oldPlayer) {
+      const updatedAttempts = attempts.map(attempt => {
+        if (attempt.playerName === oldPlayer.name && attempt.schoolName === oldPlayer.school) {
+          return { ...attempt, playerName: name, avatar };
+        }
+        return attempt;
+      });
+      setAttempts(updatedAttempts);
+      localStorage.setItem('quiz_attempts', JSON.stringify(updatedAttempts));
+    }
+  };
+
   const handleStartGame = (selectedPlayer: Player, loadedStory: string, loadedQuestions: Question[]) => {
     setCurrentPlayer(selectedPlayer);
     setStoryText(loadedStory);
@@ -265,6 +283,7 @@ const App: React.FC = () => {
           <WelcomeScreen
             players={players}
             onCreatePlayer={handleCreatePlayer}
+            onUpdatePlayer={handleUpdatePlayer}
             onStart={handleStartGame}
           />
         );
@@ -307,6 +326,7 @@ const App: React.FC = () => {
           <WelcomeScreen
             players={players}
             onCreatePlayer={handleCreatePlayer}
+            onUpdatePlayer={handleUpdatePlayer}
             onStart={handleStartGame}
           />
         );
